@@ -19,18 +19,34 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="dados_linhas.js"></script>
 <style>
+  /* Cores do S.B.P. (logo e app do grupo): slate escuro + degrade teal -> verde.
+     --azul e o "teal de destaque" (nome antigo mantido pra nao mexer no resto do CSS).
+     --verde/--amarelo/--vermelho sao as cores de STATUS do LED do totem, nao da marca. */
   :root {
-    --fundo: #0e1116; --cartao: #171b22; --borda: #2a303a; --texto: #e8ebf0; --fraco: #9aa3b2;
-    --azul: #4ea1ff; --verde: #3ddc84; --amarelo: #ffc53d; --vermelho: #ff5c5c; --lcd: #9be36b; --lcdfundo: #12240c;
+    --fundo: #f3f5f7; --cartao: #ffffff; --borda: #dde3e7; --texto: #1f2a2e; --fraco: #56656b;
+    --azul: #0f7a72; --verde: #0d8a45; --amarelo: #a36a00; --vermelho: #c62828;
+    --slate: #263236; --slate-texto: #ffffff; --slate-fraco: #b4c2c6;
+    --marca-teal: #2ab0b8; --marca-verde: #2db85c;
+    --degrade: linear-gradient(100deg, var(--marca-verde), var(--marca-teal) 55%, var(--marca-verde));
+    --aud: #d9640f; --sobre-azul: #ffffff; --lcd: #9be36b; --lcdfundo: #12240c;
   }
-  @media (prefers-color-scheme: light) {
-    :root { --fundo: #f4f5f7; --cartao: #fff; --borda: #d9dde3; --texto: #14181f; --fraco: #5b6472; --azul: #0b63ce; --verde: #0d8a45; --amarelo: #a36a00; --vermelho: #c62828; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fundo: #11181a; --cartao: #1a2326; --borda: #2c3a3e; --texto: #e8eef0; --fraco: #9fb0b5;
+            --azul: #3cc7bd; --verde: #3ddc84; --amarelo: #ffc53d; --vermelho: #ff6b6b;
+            --slate: #0c1214; --slate-fraco: #93a6ab; --aud: #ff9a52; --sobre-azul: #0c1214; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--fundo); color: var(--texto); }
-  header { padding: 20px 24px 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; }
-  h1 { font-size: 22px; margin: 0; letter-spacing: .02em; }
-  h1 span { color: var(--azul); }
+  header { padding: 16px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; background: var(--slate); color: var(--slate-texto); border-bottom: 3px solid transparent; border-image: var(--degrade) 1; }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+  .logo svg { width: 38px; height: 38px; flex: none; }
+  .logo b { display: block; font-size: 28px; line-height: 1; font-weight: 800; letter-spacing: .01em; background: var(--degrade); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .logo small { display: block; font-size: 12px; font-weight: 300; color: var(--slate-fraco); letter-spacing: .04em; }
+  h1 { font-size: 18px; margin: 0; font-weight: 500; color: var(--slate-texto); padding-left: 16px; border-left: 1px solid #ffffff33; }
+  header .pill { color: var(--slate-fraco); border-color: #ffffff33; }
+  button.primario:hover { color: var(--sobre-azul); filter: brightness(1.08); }
+  header .pill.ok { color: #6ee7a8; border-color: #6ee7a8; }
+  header .pill.off { color: #ff8a8a; border-color: #ff8a8a; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--fraco); margin: 0 0 12px; font-weight: 600; }
   .pill { font-size: 13px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--borda); color: var(--fraco); }
   .pill.ok { color: var(--verde); border-color: var(--verde); }
@@ -52,7 +68,7 @@
   .barras { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; align-items: end; height: 140px; margin-top: 8px; }
   .barra { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
   .barra i { display: block; background: var(--azul); border-radius: 3px 3px 0 0; min-height: 0; }
-  .barra i.aud { background: var(--verde); border-radius: 0; }
+  .barra i.aud { background: var(--aud); border-radius: 0; }
   .barra.agora::after { content: ""; position: absolute; inset: 0 -1px; border: 1px dashed var(--fraco); border-radius: 4px; pointer-events: none; }
   .eixo { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; font-size: 10px; color: var(--fraco); text-align: center; margin-top: 4px; }
   .legenda { font-size: 13px; color: var(--fraco); display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
@@ -68,7 +84,7 @@
   input[type=text] { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: transparent; color: inherit; font: inherit; }
   button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--borda); background: transparent; color: inherit; cursor: pointer; }
   button:hover { border-color: var(--azul); color: var(--azul); }
-  button.primario { background: var(--azul); border-color: var(--azul); color: #fff; }
+  button.primario { background: var(--azul); border-color: var(--azul); color: var(--sobre-azul); }
   .linha { display: flex; gap: 8px; flex-wrap: wrap; }
   nav.abas { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--borda); }
   nav.abas button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 14px; color: var(--fraco); }
@@ -86,7 +102,7 @@
   .tag { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; min-width: 64px; }
   .tipo { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fraco); flex: none; }
   .sentidos { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-  .sentidos button[aria-pressed=true] { background: var(--azul); border-color: var(--azul); color: #fff; }
+  .sentidos button[aria-pressed=true] { background: var(--azul); border-color: var(--azul); color: var(--sobre-azul); }
   .lista-paradas { position: relative; list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow: auto; counter-reset: p; }
   .lista-paradas li button { padding: 6px 4px; font-size: 14px; }
   .lista-paradas .min { color: var(--fraco); font-variant-numeric: tabular-nums; flex: none; min-width: 52px; }
@@ -97,11 +113,27 @@
   .leaflet-popup-content button { display: inline-block; margin: 2px 2px 0 0; padding: 2px 8px; font-size: 13px; }
   td.num button { border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--azul); text-decoration: underline; }
   footer { padding: 0 24px 28px; color: var(--fraco); font-size: 13px; max-width: 1280px; }
+  section > h2 { display: flex; align-items: center; gap: 8px; }
+  section > h2::before { content: ""; width: 4px; height: 14px; border-radius: 2px; background: var(--degrade); flex: none; }
+  nav.abas { background: var(--cartao); }
+  .pv-topo { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+  .qr { flex: none; width: 116px; text-align: center; font-size: 11px; color: var(--fraco); line-height: 1.3; }
+  .qr svg, .qr img { display: block; width: 116px; height: 116px; border-radius: 8px; background: #fff; border: 1px solid var(--borda); padding: 6px; }
+  .qr span { display: block; margin-top: 4px; }
 </style>
 </head>
 <body>
 <header>
-  <h1><span>S.B.P.</span> Ponto Virtual &amp; Painel IoB</h1>
+  <div class="logo" aria-label="SBP Smart Bus Point">
+    <svg viewBox="0 0 40 40" aria-hidden="true">
+      <defs><linearGradient id="gLogo" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#2db85c"/><stop offset="1" stop-color="#2ab0b8"/></linearGradient></defs>
+      <path d="M29 9.5C26 6.5 22 5 18 5.5 11 6.5 9 13 13 17l9 7.5c4 3.5 2 9.5-4 10-3.5.3-6.5-1-9-3.5" fill="none" stroke="url(#gLogo)" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M24 12c-2-1.6-4.5-2.2-6.5-1.6-3 1-3.3 4-1.2 5.8l8 6.7c2 1.7 1.4 4.6-1.3 5.3-2 .5-4.2-.2-6-1.6" fill="none" stroke="url(#gLogo)" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="31" cy="11" r="3" fill="#2ab0b8"/><circle cx="8" cy="30" r="3" fill="#2db85c"/>
+    </svg>
+    <div><b>SBP</b><small>Smart Bus Point</small></div>
+  </div>
+  <h1>Ponto Virtual &amp; Painel IoB</h1>
   <span id="stBroker" class="pill">broker: conectando…</span>
   <span id="stTotem" class="pill">totem: aguardando</span>
   <span id="stRelogio" class="pill">--:--</span>
@@ -116,8 +148,29 @@
 <main id="abaTotem" role="tabpanel" aria-labelledby="tTotem">
   <section>
     <h2>Ponto Virtual — o mesmo que o totem mostra</h2>
-    <div class="ponto-nome" id="pNome">Aguardando o totem…</div>
-    <div class="sub" id="pSub">Dê play no Wokwi. Os dados chegam por MQTT a cada 5 s.</div>
+    <div class="pv-topo">
+      <div>
+        <div class="ponto-nome" id="pNome">Aguardando o totem…</div>
+        <div class="sub" id="pSub">Dê play no Wokwi. Os dados chegam por MQTT a cada 5 s.</div>
+      </div>
+      <!-- TROCAR: QR Code do totem. Hoje e um placeholder generico (nao abre nada).
+           Para o real: gere o QR do link (ex.: no site do Wokwi/app do grupo), salve como
+           painel/qrcode.png e troque o <svg> abaixo por:
+           <a href="SEU_LINK_AQUI"><img src="qrcode.png" alt="QR Code: abre o Ponto Virtual no celular"></a> -->
+      <div class="qr">
+        <svg viewBox="0 0 29 29" role="img" aria-label="QR Code de exemplo (link ainda não definido)" shape-rendering="crispEdges">
+          <g fill="#263236">
+            <path d="M0 0h7v7H0zM1 1v5h5V1zM2 2h3v3H2z" fill-rule="evenodd"/>
+            <path d="M22 0h7v7h-7zM23 1v5h5V1zM24 2h3v3h-3z" fill-rule="evenodd"/>
+            <path d="M0 22h7v7H0zM1 23v5h5v-5zM2 24h3v3H2z" fill-rule="evenodd"/>
+            <path d="M9 0h2v1H9zM12 1h3v1h-3zM9 3h1v2H9zM11 2h2v2h-2zM16 0h2v3h-2zM14 4h3v1h-3zM19 2h1v4h-1zM9 6h1v1H9zM11 6h1v1h-1zM13 6h1v1h-1zM15 6h1v1h-1zM17 6h1v1h-1z"/>
+            <path d="M0 9h2v1H0zM3 9h3v2H3zM8 8h2v2H8zM11 9h4v1h-4zM16 8h1v3h-1zM19 9h3v1h-3zM24 8h1v2h-1zM26 9h3v1h-3zM1 12h2v2H1zM5 12h1v3H5zM7 11h3v1H7zM12 11h2v3h-2zM15 12h3v1h-3zM20 11h2v2h-2zM23 12h4v1h-4zM28 11h1v3h-1zM0 15h4v1H0zM8 14h1v3H8zM10 15h3v1h-3zM17 14h2v2h-2zM21 15h1v3h-1zM24 14h2v1h-2zM6 16h1v2H6zM2 18h3v1H2zM9 18h4v1H9zM14 17h2v3h-2zM18 18h2v1h-2zM23 17h3v2h-3zM27 17h2v1h-2zM0 20h1v1H0zM7 19h1v2H7zM11 20h1v1h-1zM17 20h3v1h-3zM25 20h2v1h-2z"/>
+            <path d="M9 22h2v2H9zM12 23h1v3h-1zM14 22h3v1h-3zM9 26h2v3H9zM15 25h2v2h-2zM18 22h1v1h-1zM20 21h1v3h-1zM22 22h3v3h-3zM23 23v1h1v-1zM26 22h1v2h-1zM28 24h1v2h-1zM18 25h2v1h-2zM21 26h3v1h-3zM14 28h4v1h-4zM25 27h2v2h-2zM28 28h1v1h-1z" fill-rule="evenodd"/>
+          </g>
+        </svg>
+        <span>QR Code do ponto<br>(exemplo)</span>
+      </div>
+    </div>
     <table id="pLinhas"></table>
   </section>
 
@@ -142,7 +195,7 @@
     </div>
     <div class="barras" id="barras" role="img" aria-label="Gráfico de detecções e usos do áudio por hora"></div>
     <div class="eixo" id="eixo"></div>
-    <div class="legenda"><span><i style="background:var(--azul)"></i>presenças (sensor PIR)</span><span><i style="background:var(--verde)"></i>usos do áudio</span><span>contorno tracejado = hora atual do totem</span></div>
+    <div class="legenda"><span><i style="background:var(--azul)"></i>presenças (sensor PIR)</span><span><i style="background:var(--aud)"></i>usos do áudio</span><span>contorno tracejado = hora atual do totem</span></div>
     <div class="leitura" id="leitura">Sem dados ainda. Clique no sensor PIR do Wokwi para simular pessoas chegando ao ponto.</div>
   </section>
 
@@ -369,7 +422,7 @@ $('tExplorar').onclick = () => mostrarAba('explorar');
 // Dados: dados_linhas.js, gerado por tools/gtfs_to_mapa.py a partir do GTFS.
 const explorar = (() => {
   const D = window.DADOS_LINHAS;
-  const CORES = ['#1f6feb', '#e8590c'];                     // sentido 1 azul, sentido 2 laranja
+  const CORES = ['#14928a', '#e8590c'];                     // sentido 1 teal (cor do SBP), sentido 2 laranja
   const REF = /metr[oô]|termina|hosp|shop|esta[cç][aã]o|cptm|parque|pra[cç]a|univ|facul|escola|mercado/i;
   const nLinhas = id => { const n = linhasPorParada[id]?.size || 0; return n + (n === 1 ? ' linha' : ' linhas'); };
   const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();

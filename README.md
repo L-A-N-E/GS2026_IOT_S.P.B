@@ -2,6 +2,14 @@
 
 Entrega de **Physical Computing: IoT & IoB** — FIAP Global Solution 2026.2 (CitizenTech).
 
+## Sobre o projeto
+
+O **S.B.P. (Smart Bus Point)** é um ponto de ônibus inteligente para São Paulo. No ponto fica um **totem acessível**: um display com a previsão de chegada, um botão que **fala** essa previsão em voz alta e um sensor que percebe quem está esperando. Um **QR Code** no totem leva a mesma informação para o celular, pelo app e pelo site do grupo. Este repositório é a parte física da solução: o circuito do totem com ESP32, simulado no Wokwi, e o painel web que conversa com ele.
+
+**Por que ele foi idealizado:** o ônibus é o principal transporte de quem mora em São Paulo. São cerca de **7 milhões de passageiros por dia** ([Diário do Transporte, com dados da SPTrans](https://diariodotransporte.com.br/2026/01/02/media-diaria-de-passageiros-transportados-nos-onibus-da-capital-paulista-cai-27-desde-2016-o-que-influencia-em-tarifas-e-subsidios-maiores-diz-sptrans/amp/)) em **1.325 linhas e 22 mil paradas** ([GTFS da SPTrans](https://www.sptrans.com.br/desenvolvedores/)). Mesmo assim, na maioria dos pontos ninguém sabe quando o próximo ônibus chega. Quem tem celular e internet consulta um app. Quem não enxerga, não tem celular ou está sem dados fica sem informação nenhuma. Esse grupo não é pequeno: o Brasil tem **18,6 milhões de pessoas com deficiência** (8,9% da população com 2 anos ou mais), e **47,2% delas têm 60 anos ou mais** ([IBGE, PNAD Contínua 2022](https://agenciadenoticias.ibge.gov.br/pt/agencia-noticias/37317-pessoas-com-deficiencia-tem-menor-acesso-a-educacao-ao-trabalho-e-a-renda.html?lang=pt-BR)).
+
+O projeto responde ao desafio **CitizenTech** da FIAP: levar a inovação "a quem realmente precisa dela". Ele se conecta ao **ODS 11** da ONU, meta 11.2: até 2030, transporte seguro, acessível e a preço justo para todos, com atenção especial a pessoas com deficiência e idosos. O indicador brasileiro dessa meta mede justamente o acesso ao transporte público por idade e por deficiência ([Ipea, ODS 11](https://ipea.gov.br/ods/ods11.html)).
+
 ## Ficha da CitizenTech
 
 | | |
@@ -25,16 +33,18 @@ O documento do projeto descreve três produtos: totem, app e web. Este circuito 
 - publica por **MQTT** o que o app/web precisam para o "Ponto Virtual" (espelho do totem) e recebe comandos do backend (trânsito, avisos);
 - continua funcionando **sem internet**, porque a grade fica gravada no ESP32. Isso atende exatamente quem o projeto quer incluir.
 
-```
-GTFS SPTrans ──(tools/gtfs_to_totem.py)──> totem_data.h ──> ESP32 (totem)
-                                                             │  ▲
-                                           telemetria/eventos│  │comandos
-                                                             ▼  │
-                                                     broker MQTT (HiveMQ)
-                                                             │  ▲
-                                                             ▼  │
-                                            painel/index.html (Ponto Virtual + IoB)
-                                            e, no projeto completo, backend + app
+```mermaid
+flowchart TD
+    GTFS["GTFS SPTrans<br/>(grade oficial de horários)"] -->|"tools/gtfs_to_totem.py"| DADOS["wokwi/totem_data.h"]
+    DADOS --> ESP["ESP32 — totem S.B.P.<br/>LCD, botão de áudio, PIR, LED, buzzer"]
+    ESP -->|"telemetria, eventos, IoB, frase de voz"| MQTT[("Broker MQTT<br/>HiveMQ")]
+    MQTT -->|"comandos e GPS"| ESP
+    MQTT <--> PAINEL["painel/index.html<br/>Ponto Virtual + Painel IoB"]
+    SRV["servidor_sbp.py<br/>(backend local)"] -->|"previsão GPS no tópico /gps"| MQTT
+    OV["API Olho Vivo SPTrans<br/>(GPS dos ônibus)"] --> SRV
+    SRV -->|"serve o painel e o mapa"| PAINEL
+    QR["QR Code no totem"] -.->|"abre no celular"| PAINEL
+    PAINEL -.->|"no projeto completo"| APP["backend + app do grupo"]
 ```
 
 ## Componentes
@@ -108,7 +118,7 @@ No painel:
 
 **Como rodar:**
 1. Copie `.env.exemplo` para `.env` e cole o token: `SPTRANS_TOKEN=...`
-2. Windows: duplo clique em `abrir_painel.bat`. Linux/Mac: `./abrir_painel.sh`. Ou `python servidor_sbp.py`.
+2. Windows: duplo clique em `tools\abrir_painel.bat`. Ou, em qualquer sistema: `python servidor_sbp.py`.
 3. Para a ponte GPS → totem: `pip install paho-mqtt` (sem isso o painel funciona, mas o totem fica só na grade).
 
 **Segurança do token:**
@@ -187,7 +197,8 @@ node test_gps_painel.js                                                    # pai
 - Sem o `servidor_sbp.py` rodando com token, a previsão vem da **grade programada** do GTFS mais o trânsito simulado no potenciômetro. Com ele, vem do GPS (API Olho Vivo). A integração foi escrita pela documentação oficial e testada contra uma API falsa (`tests/olhovivo_falso.py`). Com o token real, confira no primeiro uso.
 - **Demo sem token:** a API falsa simula ônibus andando em cima do trajeto real de cada linha, saindo no intervalo da hora e cada um com um atraso próprio, em qualquer linha ou parada da cidade. Rode `python tests/olhovivo_falso.py 8765` e, em outro terminal, o servidor com `SPTRANS_API=http://127.0.0.1:8765/v2.1` e `SPTRANS_TOKEN=token-de-teste`. **É simulação: diga isso se mostrar no vídeo.**
 - O buzzer não fala. A voz sai pelo painel web; num totem real seria um módulo de áudio com alto-falante.
-- O LCD 20x4 não tem acento, mapa nem toque. Mapa, toque, lista completa de linhas, carrossel e QR Code ficam no app/web do grupo.
+- O LCD 20x4 não tem acento, mapa nem toque. Mapa, toque, lista completa de linhas e carrossel ficam no app/web do grupo.
+- O QR Code do painel ainda é um **exemplo genérico** (não abre nada). Para trocar pelo real, siga o comentário `TROCAR` no `painel/index.html`.
 - O broker é público e sem senha, o que serve para demonstração. Em produção: broker próprio com TLS e autenticação por totem.
 - Os contadores IoB são do totem, contam detecções de movimento (não pessoas únicas) e zeram quando ele reinicia.
 - O documento do grupo fala em "voltar à tela padrão após 30 s sem toque". Como o LCD não tem toque, aqui os 30 s viraram economia de energia: sem movimento por 30 s, a luz do display apaga, e volta com presença ou com qualquer botão. O LED continua aceso.
