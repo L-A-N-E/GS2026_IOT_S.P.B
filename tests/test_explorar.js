@@ -24,8 +24,17 @@ const V = process.env.VENDOR || '/tmp/vend/';
   await page.click('#tExplorar');
   await page.waitForTimeout(400);
   ok(await page.isVisible('#mapa') && !(await page.isVisible('#pNome')), 'aba Explorar abre e esconde a aba do totem');
-  ok(await page.textContent('#lNum') === '5757-51', 'abre com a linha de exemplo 5757-51');
+  ok(await page.isVisible('#painelParada') && /Cupec/i.test(await page.textContent('#pqNome')), 'abre na parada do totem: ' + await page.textContent('#pqNome'));
+  const nLinhasAqui = await page.locator('#pqLinhas li button').count();
+  ok(nLinhasAqui >= 5, 'lista os ônibus que passam nessa parada (' + nLinhasAqui + ')');
+  await page.locator('#pqLinhas li button', { hasText: '5757-51' }).first().click(); await page.waitForTimeout(400);
+  ok(await page.textContent('#lNum') === '5757-51', 'tocar na linha abre a 5757-51');
   ok(await page.locator('#mapa path.leaflet-interactive').count() >= 20, 'trajeto (2 sentidos) e paradas desenhados');
+  ok(await page.locator('#lParadas li.aqui').count() === 1 && /agora/.test(await page.textContent('#lParadas li.aqui .min')), 'a lista começa em "você está aqui"');
+  ok(/\+\d+ min/.test(await page.textContent('#lParadas li:nth-child(2) .min')), 'as próximas paradas mostram o tempo a partir daqui');
+  ok(await page.isVisible('#bAntes'), 'paradas que ficaram pra trás ficam escondidas (botão para mostrar)');
+  await page.click('#bVoltarParada'); await page.waitForTimeout(300);
+  ok(await page.isVisible('#painelParada'), 'voltar leva de novo para os ônibus da parada');
 
   await page.fill('#busca', 'pedreira'); await page.waitForTimeout(400);
   const nres = await page.locator('#resultados li').count();

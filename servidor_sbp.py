@@ -177,7 +177,7 @@ class OlhoVivo:
                     onibus.append({"sentido": c.get("sl"), "prefixo": v.get("p"), "acessivel": bool(v.get("a")),
                                    "lat": v.get("py"), "lon": v.get("px"), "atualizado": v.get("ta")})
             return {"hora": hr, "onibus": onibus}
-        return self._cacheado("pos:" + letreiro, 15, busca)
+        return self._cacheado("pos:" + letreiro, 8, busca)     # painel consulta a cada 10 s
 
 
 def minutos_entre(agora, depois):

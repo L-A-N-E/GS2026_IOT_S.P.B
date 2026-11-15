@@ -111,10 +111,10 @@ No totem:
 - trocar de ponto descarta o GPS do ponto anterior.
 
 No painel:
-- etiqueta "GPS Olho Vivo: ligado" no topo;
+- o menu de conexões no topo mostra "GPS Olho Vivo: ligado";
 - marca **GPS** nas linhas do Ponto Virtual que vêm do Olho Vivo;
-- na aba Explorar, o botão **Ônibus agora (GPS)** mostra os ônibus da linha no mapa, atualizando a cada 15 s;
-- clicar numa parada mostra a previsão real de chegada, com ♿ nos ônibus acessíveis.
+- na aba Explorar, a parada mostra quando chega cada ônibus (GPS) e, ao abrir uma linha, os ônibus aparecem **sozinhos** no mapa. O painel consulta a cada 10 s e o ônibus desliza até a posição nova. A SPTrans atualiza cada ônibus a cada 30–60 s, então ele anda aos poucos. Dá pra pausar;
+- clicar numa parada no mapa mostra a previsão real de chegada e quais ônibus são acessíveis.
 
 **Como rodar:**
 1. Copie `.env.exemplo` para `.env` e cole o token: `SPTRANS_TOKEN=...`
@@ -130,15 +130,13 @@ Sem token, tudo continua funcionando com a grade GTFS.
 
 ## Painel: aba "Explorar linhas"
 
-Além do Ponto Virtual, o `painel/index.html` tem uma segunda aba com o **mapa da cidade inteira** (1.325 linhas, 22 mil paradas):
+Além do Ponto Virtual, o `painel/index.html` tem uma segunda aba com o **mapa da cidade inteira** (1.325 linhas, 22 mil paradas). Ela responde à pergunta de quem está no ponto: **que ônibus passam aqui, quando chegam e para onde vão?**
 
-- busca por número da linha, destino ou nome da parada (com ou sem acento);
-- trajeto real da linha desenhado no mapa, nos dois sentidos, com todas as paradas;
-- lista das paradas em ordem, com "+X min" desde a origem e os pontos de referência (metrô, terminal, hospital, shopping…) em destaque;
-- intervalo da linha na hora atual e horário de funcionamento;
-- clicar numa parada mostra todas as linhas que passam nela;
-- **Onde estou**: usa a localização do celular/PC e lista as paradas mais próximas;
-- no Ponto Virtual, clicar no número de uma linha abre o mapa com o ponto do totem destacado.
+1. **Você está aqui:** a aba abre na parada do totem (ou em outra, pela busca ou pelo botão **Perto de mim**, que usa a localização do celular/PC). Ela lista os ônibus que passam ali, com o destino e a chegada pelo GPS. Sem GPS, mostra o intervalo da grade.
+2. **Para onde ela te leva:** ao tocar numa linha, a lista de paradas começa em "você está aqui" e mostra o tempo **a partir dali** ("+12 min"). As paradas que já ficaram pra trás ficam escondidas, e há um botão pra mostrá-las. Os tempos são estimativas da grade programada.
+3. **No mapa:** o trajeto real nos dois sentidos, as paradas, os pontos de referência (metrô, terminal, hospital, shopping…) em destaque e os ônibus ao vivo (GPS). O cabeçalho da linha mostra o intervalo na hora atual e o horário de funcionamento.
+
+Também dá pra buscar por número da linha, destino ou nome da parada (com ou sem acento). No Ponto Virtual, clicar no número de uma linha abre o mapa a partir do ponto do totem.
 
 É o protótipo do "Mapa de Referências Urbanas" e da aba "Explorar" do app descritos no documento do grupo.
 
@@ -194,7 +192,7 @@ node test_gps_painel.js                                                    # pai
 
 ## Limites desta maquete
 
-- Sem o `servidor_sbp.py` rodando com token, a previsão vem da **grade programada** do GTFS mais o trânsito simulado no potenciômetro. Com ele, vem do GPS (API Olho Vivo). A integração foi escrita pela documentação oficial e testada contra uma API falsa (`tests/olhovivo_falso.py`). Com o token real, confira no primeiro uso.
+- Sem o `servidor_sbp.py` rodando com token, a previsão vem da **grade programada** do GTFS mais o trânsito simulado no potenciômetro. Com ele, vem do GPS (API Olho Vivo). A integração segue a documentação oficial e foi conferida com o token real em 15/11/2026: login, previsão por parada (os códigos de parada do GTFS funcionam direto) e posição dos ônibus. Os testes automáticos usam uma API falsa (`tests/olhovivo_falso.py`), para rodar sem token e sem internet.
 - **Demo sem token:** a API falsa simula ônibus andando em cima do trajeto real de cada linha, saindo no intervalo da hora e cada um com um atraso próprio, em qualquer linha ou parada da cidade. Rode `python tests/olhovivo_falso.py 8765` e, em outro terminal, o servidor com `SPTRANS_API=http://127.0.0.1:8765/v2.1` e `SPTRANS_TOKEN=token-de-teste`. **É simulação: diga isso se mostrar no vídeo.**
 - O buzzer não fala. A voz sai pelo painel web; num totem real seria um módulo de áudio com alto-falante.
 - O LCD 20x4 não tem acento, mapa nem toque. Mapa, toque, lista completa de linhas e carrossel ficam no app/web do grupo.
