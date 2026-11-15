@@ -1,6 +1,8 @@
 .env
 __pycache__/
 tests/*.png
+CLAUDE.md
+.claude/
 node_modules/
 package-lock.json
 tests/*.exe
