@@ -1,0 +1,6 @@
+.env
+__pycache__/
+tests/*.png
+node_modules/
+package-lock.json
+tests/*.exe

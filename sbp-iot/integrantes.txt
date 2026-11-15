@@ -1,0 +1,12 @@
+S.B.P. - Smart Bus Point
+FIAP - Global Solution 2026.2 (CitizenTech) - Engenharia de Software - 3o ano 
+Disciplina: Physical Computing: IoT & IoB
+
+Integrantes:
+Alice Santos Bulhões - RM554499
+Eduardo Oliveira Cardoso Madid - RM556349
+Nicolas Haubricht Hainfellner - RM556259
+Guilherme da Cunha Melo - RM555310
+
+Link do projeto no Wokwi: <COLAR AQUI>
+Link do vídeo (até 4 min): <COLAR AQUI>

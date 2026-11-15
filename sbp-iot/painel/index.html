@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S.B.P. — Ponto Virtual e Painel IoB</title>
+<!--
+  S.B.P. Smart Bus Point — Ponto Virtual + Painel IoB
+  Abre direto no navegador (nao precisa de servidor). Conecta no mesmo broker
+  MQTT publico que o totem (ESP32 no Wokwi) e:
+    1. espelha o que o totem mostra (o "Ponto Virtual" que o QR Code abriria);
+    2. LE EM VOZ ALTA a frase quando alguem aperta o botao de audio no totem;
+    3. mostra o comportamento do ponto por hora (IoB) e gera uma leitura;
+    4. faz o papel do backend, mandando comandos pro totem.
+  Nenhum dado pessoal: so contagens anonimas de presenca e de uso do botao.
+-->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="dados_linhas.js"></script>
+<style>
+  :root {
+    --fundo: #0e1116; --cartao: #171b22; --borda: #2a303a; --texto: #e8ebf0; --fraco: #9aa3b2;
+    --azul: #4ea1ff; --verde: #3ddc84; --amarelo: #ffc53d; --vermelho: #ff5c5c; --lcd: #9be36b; --lcdfundo: #12240c;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --fundo: #f4f5f7; --cartao: #fff; --borda: #d9dde3; --texto: #14181f; --fraco: #5b6472; --azul: #0b63ce; --verde: #0d8a45; --amarelo: #a36a00; --vermelho: #c62828; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--fundo); color: var(--texto); }
+  header { padding: 20px 24px 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .02em; }
+  h1 span { color: var(--azul); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--fraco); margin: 0 0 12px; font-weight: 600; }
+  .pill { font-size: 13px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--borda); color: var(--fraco); }
+  .pill.ok { color: var(--verde); border-color: var(--verde); }
+  .pill.off { color: var(--vermelho); border-color: var(--vermelho); }
+  main { display: grid; gap: 16px; padding: 12px 24px 32px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); max-width: 1280px; }
+  section { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 18px; min-width: 0; }
+  .larga { grid-column: 1 / -1; }
+  .ponto-nome { font-size: 24px; font-weight: 700; line-height: 1.2; }
+  .sub { color: var(--fraco); font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-variant-numeric: tabular-nums; }
+  td { padding: 9px 4px; border-top: 1px solid var(--borda); vertical-align: middle; }
+  td.num { font-weight: 700; white-space: nowrap; }
+  td.eta { text-align: right; white-space: nowrap; font-weight: 700; font-size: 18px; }
+  td.eta small { display: block; font-weight: 400; color: var(--fraco); font-size: 12px; }
+  .verde { color: var(--verde); } .amarelo { color: var(--amarelo); } .vermelho { color: var(--vermelho); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .kpi b { display: block; font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--fraco); font-size: 13px; }
+  .barras { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; align-items: end; height: 140px; margin-top: 8px; }
+  .barra { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+  .barra i { display: block; background: var(--azul); border-radius: 3px 3px 0 0; min-height: 0; }
+  .barra i.aud { background: var(--verde); border-radius: 0; }
+  .barra.agora::after { content: ""; position: absolute; inset: 0 -1px; border: 1px dashed var(--fraco); border-radius: 4px; pointer-events: none; }
+  .eixo { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; font-size: 10px; color: var(--fraco); text-align: center; margin-top: 4px; }
+  .legenda { font-size: 13px; color: var(--fraco); display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+  .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .leitura { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--azul); background: color-mix(in srgb, var(--azul) 10%, transparent); border-radius: 0 8px 8px 0; }
+  #feed { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; font-size: 14px; }
+  #feed li { padding: 6px 0; border-top: 1px solid var(--borda); display: flex; gap: 10px; }
+  #feed time { color: var(--fraco); font-variant-numeric: tabular-nums; flex: none; }
+  .fala { font-size: 18px; min-height: 54px; }
+  .controles { display: grid; gap: 14px; }
+  label { font-size: 14px; color: var(--fraco); display: block; margin-bottom: 4px; }
+  input[type=range] { width: 100%; }
+  input[type=text] { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--borda); background: transparent; color: inherit; font: inherit; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--borda); background: transparent; color: inherit; cursor: pointer; }
+  button:hover { border-color: var(--azul); color: var(--azul); }
+  button.primario { background: var(--azul); border-color: var(--azul); color: #fff; }
+  .linha { display: flex; gap: 8px; flex-wrap: wrap; }
+  nav.abas { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--borda); }
+  nav.abas button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 14px; color: var(--fraco); }
+  nav.abas button[aria-selected=true] { color: var(--texto); border-bottom-color: var(--azul); font-weight: 600; }
+  #abaExplorar { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; padding: 12px 24px 32px; max-width: 1400px; }
+  #abaExplorar[hidden], #abaTotem[hidden] { display: none; }
+  @media (max-width: 800px) { #abaExplorar { grid-template-columns: 1fr; } }
+  #mapa { height: 72vh; min-height: 420px; border-radius: 12px; border: 1px solid var(--borda); }
+  .lateral { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .lateral section { padding: 14px; }
+  #busca { font-size: 17px; }
+  .resultados { list-style: none; margin: 8px 0 0; padding: 0; max-height: 34vh; overflow: auto; }
+  .resultados li button, .lista-paradas li button { width: 100%; text-align: left; border: 0; border-top: 1px solid var(--borda); border-radius: 0; padding: 8px 4px; display: flex; gap: 10px; align-items: baseline; }
+  .resultados li:first-child button { border-top: 0; }
+  .tag { font-weight: 700; font-variant-numeric: tabular-nums; flex: none; min-width: 64px; }
+  .tipo { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fraco); flex: none; }
+  .sentidos { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .sentidos button[aria-pressed=true] { background: var(--azul); border-color: var(--azul); color: #fff; }
+  .lista-paradas { position: relative; list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow: auto; counter-reset: p; }
+  .lista-paradas li button { padding: 6px 4px; font-size: 14px; }
+  .lista-paradas .min { color: var(--fraco); font-variant-numeric: tabular-nums; flex: none; min-width: 52px; }
+  .lista-paradas .ref { font-weight: 700; color: var(--azul); }
+  .lista-paradas .aqui { background: color-mix(in srgb, var(--verde) 18%, transparent); }
+  .info-linha { font-size: 14px; color: var(--fraco); }
+  .info-linha b { color: var(--texto); }
+  .leaflet-popup-content button { display: inline-block; margin: 2px 2px 0 0; padding: 2px 8px; font-size: 13px; }
+  td.num button { border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--azul); text-decoration: underline; }
+  footer { padding: 0 24px 28px; color: var(--fraco); font-size: 13px; max-width: 1280px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>S.B.P.</span> Ponto Virtual &amp; Painel IoB</h1>
+  <span id="stBroker" class="pill">broker: conectando…</span>
+  <span id="stTotem" class="pill">totem: aguardando</span>
+  <span id="stRelogio" class="pill">--:--</span>
+  <span id="stGps" class="pill" title="API Olho Vivo da SPTrans (GPS dos ônibus)">GPS: verificando…</span>
+</header>
+
+<nav class="abas" role="tablist">
+  <button role="tab" id="tTotem" aria-controls="abaTotem" aria-selected="true">Totem ao vivo</button>
+  <button role="tab" id="tExplorar" aria-controls="abaExplorar" aria-selected="false">Explorar linhas</button>
+</nav>
+
+<main id="abaTotem" role="tabpanel" aria-labelledby="tTotem">
+  <section>
+    <h2>Ponto Virtual — o mesmo que o totem mostra</h2>
+    <div class="ponto-nome" id="pNome">Aguardando o totem…</div>
+    <div class="sub" id="pSub">Dê play no Wokwi. Os dados chegam por MQTT a cada 5 s.</div>
+    <table id="pLinhas"></table>
+  </section>
+
+  <section>
+    <h2>Acessibilidade — voz do totem</h2>
+    <div class="fala" id="fala" aria-live="polite">Quando alguém apertar o botão verde no totem, a frase aparece aqui e é lida em voz alta.</div>
+    <div class="linha" style="margin-top:12px">
+      <button class="primario" id="btnVoz">Ativar voz neste navegador</button>
+      <button id="btnRepetir">Repetir</button>
+    </div>
+    <p class="sub" style="margin-bottom:0">No totem real, a mesma frase sairia de um alto-falante. Na simulação, o buzzer toca um código de bipes e este painel faz a leitura.</p>
+  </section>
+
+  <section class="larga">
+    <h2>IoB — comportamento do ponto por hora</h2>
+    <div class="kpis">
+      <div class="kpi"><b id="kPres">0</b><span>detecções de presença (desde que o totem ligou)</span></div>
+      <div class="kpi"><b id="kAud">0</b><span>usos do botão de áudio</span></div>
+      <div class="kpi"><b id="kTaxa">–</b><span>usos do áudio por detecção</span></div>
+      <div class="kpi"><b id="kPico">–</b><span>hora de maior movimento</span></div>
+      <div class="kpi"><b id="kOferta">–</b><span>ônibus/hora agora (GTFS)</span></div>
+    </div>
+    <div class="barras" id="barras" role="img" aria-label="Gráfico de detecções e usos do áudio por hora"></div>
+    <div class="eixo" id="eixo"></div>
+    <div class="legenda"><span><i style="background:var(--azul)"></i>presenças (sensor PIR)</span><span><i style="background:var(--verde)"></i>usos do áudio</span><span>contorno tracejado = hora atual do totem</span></div>
+    <div class="leitura" id="leitura">Sem dados ainda. Clique no sensor PIR do Wokwi para simular pessoas chegando ao ponto.</div>
+  </section>
+
+  <section>
+    <h2>Eventos ao vivo</h2>
+    <ul id="feed" aria-live="polite"></ul>
+  </section>
+
+  <section>
+    <h2>Central de operação — comandos para o totem</h2>
+    <div class="controles">
+      <div>
+        <label for="rTransito">Trânsito informado pelo backend: <b id="vTransito">0%</b></label>
+        <input type="range" id="rTransito" min="0" max="100" step="5" value="0">
+      </div>
+      <div>
+        <label for="tAviso">Aviso no display (até 18 letras)</label>
+        <div class="linha"><input type="text" id="tAviso" maxlength="18" placeholder="LINHA COM DESVIO" style="flex:1"><button id="bAviso">Enviar</button><button id="bLimpar">Limpar</button></div>
+      </div>
+      <div>
+        <label id="lPonto">Ponto onde o totem está instalado</label>
+        <div class="linha" role="group" aria-labelledby="lPonto"><button data-ponto="0">Metrô Conceição (ponto final)</button><button data-ponto="1">Av. Cupecê, 4734 (passagem)</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<main id="abaExplorar" role="tabpanel" aria-labelledby="tExplorar" hidden>
+  <div class="lateral">
+    <section>
+      <label for="busca">Buscar linha, destino ou parada</label>
+      <input type="text" id="busca" placeholder="ex.: 5757, Pedreira, Metrô Conceição" autocomplete="off">
+      <div class="linha" style="margin-top:8px"><button id="bOndeEstou">Onde estou</button></div>
+      <ul class="resultados" id="resultados" aria-live="polite"></ul>
+    </section>
+    <section id="painelLinha" hidden>
+      <div class="ponto-nome" id="lNum"></div>
+      <div class="sub" id="lNome"></div>
+      <div class="sentidos" id="lSentidos" role="group" aria-label="Sentido"></div>
+      <div class="info-linha" id="lInfo"></div>
+      <div class="linha" style="margin-top:8px"><button id="bAoVivo" hidden aria-pressed="false">Ônibus agora (GPS)</button><span class="sub" id="aoVivoInfo"></span></div>
+      <h2 style="margin-top:12px">Paradas em ordem</h2>
+      <ul class="lista-paradas" id="lParadas"></ul>
+    </section>
+  </div>
+  <div>
+    <div id="mapa" role="region" aria-label="Mapa do trajeto"></div>
+    <p class="sub" id="rodapeMapa">Trajeto, paradas e intervalos: GTFS SPTrans (grade programada, não GPS). Mapa: © OpenStreetMap / CARTO. <span id="avisoArquivo" hidden><br>⚠️ Aberto como arquivo: para o mapa completo e o GPS ao vivo, abra pelo <code>servidor_sbp.py</code> (ou <code>abrir_painel</code>).</span></p>
+  </div>
+</main>
+
+<footer>
+  Tópicos MQTT: <code id="topico"></code> · Dados de linhas e horários: GTFS SPTrans · Sem dados pessoais: o sensor conta movimento, não identifica ninguém.
+</footer>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOTEM = params.get('totem') || 'sbp-0001';
+const BASE = 'sbp-gs2026/totem/' + TOTEM;
+const $ = id => document.getElementById(id);
+$('topico').textContent = BASE + '/#';
+
+let voz = false, ultimaFrase = '', horaTotem = null, oferta = null, pontoAtualId = null;
+let iob = { presencas: Array(24).fill(0), audio: Array(24).fill(0) };
+
+// ---- voz -------------------------------------------------------------
+// "5757-51" vira "5 7 5 7, 51": e assim que as pessoas falam o numero da linha
+const paraFala = t => t.replace(/\b([0-9A-Z]{4})-(\d{2})\b/g, (_, a, b) => a.split('').join(' ') + ', ' + b);
+function falar(texto) {
+  if (!voz || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(paraFala(texto));
+  u.lang = 'pt-BR'; u.rate = 0.95;
+  const v = speechSynthesis.getVoices().find(x => x.lang && x.lang.toLowerCase().startsWith('pt'));
+  if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+$('btnVoz').onclick = () => { voz = true; $('btnVoz').textContent = 'Voz ativada'; falar('Voz ativada. Aperte o botão verde no totem.'); };
+$('btnRepetir').onclick = () => ultimaFrase && falar(ultimaFrase);
+
+// ---- desenho ---------------------------------------------------------
+function feed(txt) {
+  const li = document.createElement('li');
+  const t = document.createElement('time'); t.textContent = new Date().toLocaleTimeString('pt-BR');
+  const s = document.createElement('span'); s.textContent = txt;
+  li.append(t, s); $('feed').prepend(li);
+  while ($('feed').children.length > 60) $('feed').lastChild.remove();
+}
+const corEta = m => m <= 3 ? 'verde' : m <= 10 ? 'amarelo' : 'vermelho';
+const txtEta = m => m < 1 ? 'agora' : m > 90 ? '+1h30' : m + ' min';
+
+function desenharStatus(s) {
+  if (!s.online) { $('stTotem').textContent = 'totem: offline'; $('stTotem').className = 'pill off'; return; }
+  $('stTotem').textContent = 'totem ' + s.totem + ': online'; $('stTotem').className = 'pill ok';
+  $('pNome').textContent = s.nome; pontoAtualId = s.ponto;
+  $('pSub').textContent = (s.final ? 'Ponto final' : 'Ponto de passagem') + ' · parada SPTrans nº ' + s.ponto;
+}
+function desenharTelemetria(t) {
+  horaTotem = parseInt(t.relogio, 10); oferta = t.onibusHora; pontoAtualId = t.ponto;   // ponto da tabela que esta na tela
+  $('stRelogio').textContent = t.relogio + (t.demo ? ' (demo acelerada)' : '');
+  $('kOferta').textContent = t.onibusHora;
+  const tb = $('pLinhas'); tb.replaceChildren();
+  for (const l of t.linhas) {
+    const tr = tb.insertRow();
+    const c1 = tr.insertCell(); c1.className = 'num';
+    const bl = document.createElement('button'); bl.textContent = l.n; bl.title = 'Ver trajeto no mapa';
+    bl.onclick = () => explorar.abrirLinha(l.n, t.ponto);   // abre o mapa ja marcando o ponto desta tabela
+    c1.append(bl);
+    const cd = tr.insertCell(); cd.textContent = l.d;
+    if (l.g) { const g = document.createElement('span'); g.className = 'pill ok'; g.style.marginLeft = '8px'; g.style.fontSize = '11px'; g.textContent = 'GPS'; g.title = 'Previsão real (API Olho Vivo)'; cd.append(g); }
+    const c3 = tr.insertCell(); c3.className = 'eta';
+    if (l.eta.length) {
+      c3.classList.add(corEta(l.eta[0])); c3.textContent = txtEta(l.eta[0]);
+      if (l.eta.length > 1) { const sm = document.createElement('small'); sm.textContent = 'depois ' + l.eta.slice(1).map(txtEta).join(', '); c3.append(sm); }
+    } else c3.textContent = 'sem previsão';
+  }
+  const extra = ['trânsito ' + t.nivel.toLowerCase() + ' (' + t.transito + '%)'];
+  if (t.aviso) extra.push('aviso: ' + t.aviso);
+  if (!t.telaAcesa) extra.push('tela do totem em economia de energia');
+  $('pSub').textContent = $('pSub').textContent.split(' — ')[0] + ' — ' + extra.join(' · ');
+  desenharIoB();
+}
+function desenharIoB() {
+  const p = iob.presencas, a = iob.audio;
+  const totP = p.reduce((x, y) => x + y, 0), totA = a.reduce((x, y) => x + y, 0);
+  const max = Math.max(1, ...p, ...a);
+  const pico = p.indexOf(Math.max(...p));
+  $('kPres').textContent = totP; $('kAud').textContent = totA;
+  $('kTaxa').textContent = totP ? Math.min(100, Math.round(100 * totA / totP)) + '%' : '–';
+  $('kPico').textContent = totP ? pico + 'h' : '–';
+  const b = $('barras'); b.replaceChildren();
+  for (let h = 0; h < 24; h++) {
+    const d = document.createElement('div'); d.className = 'barra' + (h === horaTotem ? ' agora' : '');
+    d.title = h + 'h: ' + p[h] + ' presenças, ' + a[h] + ' usos do áudio';
+    const i1 = document.createElement('i'); i1.style.height = (100 * p[h] / max) + '%';
+    const i2 = document.createElement('i'); i2.className = 'aud'; i2.style.height = (100 * a[h] / max) + '%';
+    d.append(i1, i2); b.append(d);
+  }
+  // leitura automatica: demanda (pessoas) x oferta (onibus/hora do GTFS)
+  let txt = 'Sem dados ainda. Clique no sensor PIR do Wokwi para simular pessoas chegando ao ponto.';
+  if (totP) {
+    txt = 'O maior movimento foi às ' + pico + 'h (' + p[pico] + ' detecções de presença).';
+    if (oferta && horaTotem === pico) {
+      const porOnibus = p[pico] / oferta;
+      txt += ' Nessa hora passam ' + oferta + ' ônibus, cerca de ' + porOnibus.toFixed(1).replace('.', ',') + ' detecção(ões) por ônibus.';
+      if (porOnibus >= 8) txt += ' Demanda alta para a oferta: vale sugerir reforço da linha nesse horário.';
+    }
+    if (totA) txt += ' O botão de áudio foi usado ' + totA + ' vez(es) (' + Math.min(100, Math.round(100 * totA / totP)) + '% das detecções), o que mostra uso real do recurso de acessibilidade neste ponto.';
+    else txt += ' Ninguém usou o botão de áudio ainda.';
+  }
+  $('leitura').textContent = txt;
+}
+$('eixo').append(...Array.from({ length: 24 }, (_, h) => { const s = document.createElement('span'); s.textContent = h % 3 ? '' : h + 'h'; return s; }));
+desenharIoB();
+
+// ---- MQTT ------------------------------------------------------------
+const nomesEvento = { presenca: 'Pessoa detectada no ponto', audio: 'Botão de áudio (acessibilidade) acionado', troca_ponto: 'Totem reconfigurado para outro ponto' };
+function tratar(topico, texto) {
+  const sub = topico.slice(BASE.length + 1);
+  try {
+    if (sub === 'tts') { ultimaFrase = texto; $('fala').textContent = '“' + texto + '”'; falar(texto); return; }
+    const j = JSON.parse(texto);
+    if (sub === 'status') desenharStatus(j);
+    else if (sub === 'telemetria') desenharTelemetria(j);
+    else if (sub === 'iob') {
+      const ok = v => Array.isArray(v) && v.length === 24 && v.every(Number.isFinite);   // broker publico: valida antes de usar
+      if (ok(j.presencas) && ok(j.audio)) { iob = j; horaTotem = j.hora; desenharIoB(); }
+    }
+    else if (sub === 'evento') feed((nomesEvento[j.tipo] || j.tipo) + ' — relógio do totem ' + j.relogio);
+  } catch (e) { console.warn('mensagem ignorada', topico, e); }
+}
+let cliente = null;
+if (window.mqtt) {
+  cliente = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', { clientId: 'sbp-painel-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000 });
+  cliente.on('connect', () => { $('stBroker').textContent = 'broker: conectado'; $('stBroker').className = 'pill ok'; cliente.subscribe(BASE + '/#'); });
+  cliente.on('close', () => { $('stBroker').textContent = 'broker: desconectado'; $('stBroker').className = 'pill off'; });
+  cliente.on('message', (t, m) => tratar(t, new TextDecoder().decode(m)));
+} else {
+  $('stBroker').textContent = 'broker: biblioteca MQTT não carregou (sem internet?)'; $('stBroker').className = 'pill off';
+}
+const cmd = c => { if (cliente && cliente.connected) { cliente.publish(BASE + '/cmd', c); feed('Comando enviado ao totem: ' + c); } else feed('Sem conexão com o broker: comando não enviado'); };
+$('rTransito').oninput = e => $('vTransito').textContent = e.target.value + '%';
+$('rTransito').onchange = e => cmd('TRANSITO=' + e.target.value);
+$('bAviso').onclick = () => cmd('AVISO=' + $('tAviso').value);
+$('bLimpar').onclick = () => { $('tAviso').value = ''; cmd('AVISO='); };
+document.querySelectorAll('[data-ponto]').forEach(b => b.onclick = () => cmd('PONTO=' + b.dataset.ponto));
+window.__tratar = tratar;   // usado pelos testes
+
+// ---- Olho Vivo (GPS) via servidor_sbp.py ------------------------------
+// O navegador nunca ve o token: ele pede pro servidor local, que guarda o token no .env.
+let gpsOk = false;
+async function api(caminho) {
+  const r = await fetch(caminho, { cache: 'no-store' });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.erro || r.status);
+  return j;
+}
+async function verificarGps() {
+  const pill = $('stGps');
+  if (!location.protocol.startsWith('http')) {
+    pill.textContent = 'GPS: abra pelo servidor'; pill.className = 'pill';
+    $('avisoArquivo') && ($('avisoArquivo').hidden = false); return;
+  }
+  try {
+    const j = await api('/api/status');
+    gpsOk = j.olhovivo;
+    pill.textContent = gpsOk ? 'GPS Olho Vivo: ligado' : 'GPS: ' + (j.erro || 'desligado');
+    pill.className = 'pill ' + (gpsOk ? 'ok' : 'off');
+  } catch (e) { pill.textContent = 'GPS: servidor sem resposta'; pill.className = 'pill off'; }
+  explorar.gpsMudou();
+}
+
+// ---- abas ------------------------------------------------------------
+function mostrarAba(qual) {
+  const ex = qual === 'explorar';
+  $('abaTotem').hidden = ex; $('abaExplorar').hidden = !ex;
+  $('tTotem').setAttribute('aria-selected', !ex); $('tExplorar').setAttribute('aria-selected', ex);
+  if (ex) explorar.iniciar();
+}
+$('tTotem').onclick = () => mostrarAba('totem');
+$('tExplorar').onclick = () => mostrarAba('explorar');
+
+// ---- Explorar linhas (mapa) -------------------------------------------
+// Dados: dados_linhas.js, gerado por tools/gtfs_to_mapa.py a partir do GTFS.
+const explorar = (() => {
+  const D = window.DADOS_LINHAS;
+  const CORES = ['#1f6feb', '#e8590c'];                     // sentido 1 azul, sentido 2 laranja
+  const REF = /metr[oô]|termina|hosp|shop|esta[cç][aã]o|cptm|parque|pra[cç]a|univ|facul|escola|mercado/i;
+  const nLinhas = id => { const n = linhasPorParada[id]?.size || 0; return n + (n === 1 ? ' linha' : ' linhas'); };
+  const norm = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  let mapa = null, camada = null, camadaGps = null, timerGps = null, linhaAtual = null, sentidoAtual = 0, destaque = null, linhasPorParada = null;
+
+  function indexar() {                                     // parada -> linhas que passam nela
+    linhasPorParada = {};
+    D.linhas.forEach((L, i) => L.s.forEach(s => s.paradas.forEach(p => (linhasPorParada[p] ||= new Set()).add(i))));
+  }
+  function decodificar(t) {                                // inteiros com diferenca -> [lat, lon]
+    const pts = []; let la = 0, lo = 0;
+    for (let i = 0; i < t.length; i += 2) { la += t[i]; lo += t[i + 1]; pts.push([la / D.escala, lo / D.escala]); }
+    return pts;
+  }
+  function iniciar() {
+    if (!D) { $('resultados').innerHTML = ''; li($('resultados'), 'Arquivo dados_linhas.js não encontrado ao lado do index.html.'); return; }
+    if (!window.L) { li($('resultados'), 'O mapa (Leaflet) não carregou: confira a internet.'); return; }
+    if (mapa) { setTimeout(() => mapa.invalidateSize(), 50); return; }
+    mapa = L.map('mapa').setView([-23.55, -46.63], 11);
+    // Fundo do mapa: OpenStreetMap. O servidor do OSM so libera pagina aberta por http(s)
+    // (pelo servidor_sbp.py); aberta como arquivo (file://) ele bloqueia, entao ai usamos a CARTO
+    // (mesmos dados do OSM). Se o primeiro falhar varias vezes, troca sozinho pro proximo.
+    const escuro = matchMedia('(prefers-color-scheme: dark)').matches;
+    const osm = ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', '© OpenStreetMap', 'abc'];
+    const carto = ['https://{s}.basemaps.cartocdn.com/' + (escuro ? 'dark_all' : 'rastertiles/voyager') + '/{z}/{x}/{y}{r}.png', '© OpenStreetMap © CARTO', 'abcd'];
+    const fundos = location.protocol.startsWith('http') ? [osm, carto] : [carto];
+    let qualFundo = 0, errosFundo = 0, fundo = null;
+    const porFundo = () => {
+      if (fundo) mapa.removeLayer(fundo);
+      const [url, attr, sub] = fundos[qualFundo];
+      fundo = L.tileLayer(url, { maxZoom: 19, attribution: attr, subdomains: sub }).addTo(mapa);
+      fundo.on('tileerror', () => { if (++errosFundo >= 4 && qualFundo < fundos.length - 1) { qualFundo++; errosFundo = 0; porFundo(); } });
+    };
+    porFundo();
+    camada = L.layerGroup().addTo(mapa);
+    camadaGps = L.layerGroup().addTo(mapa);
+    indexar();
+    if (!linhaAtual) abrirLinha('5757-51', pontoAtualId);
+  }
+  function li(ul, txt) { const e = document.createElement('li'); e.className = 'sub'; e.style.padding = '8px 4px'; e.textContent = txt; ul.append(e); }
+  function botao(tag, texto, tipo, acao) {
+    const e = document.createElement('li'), b = document.createElement('button');
+    const t = document.createElement('span'); t.className = 'tag'; t.textContent = tag;
+    const x = document.createElement('span'); x.textContent = texto;
+    b.append(t, x);
+    if (tipo) { const k = document.createElement('span'); k.className = 'tipo'; k.textContent = tipo; b.append(k); }
+    b.onclick = acao; e.append(b); return e;
+  }
+  function buscar(q) {
+    const ul = $('resultados'); ul.replaceChildren();
+    q = norm(q.trim()); if (q.length < 2) return;
+    const linhas = D.linhas.map((L, i) => [L, i]).filter(([L]) => norm(L.n).includes(q) || norm(L.nome).includes(q) || L.s.some(s => norm(s.dest).includes(q))).slice(0, 25);
+    linhas.forEach(([L, i]) => ul.append(botao(L.n, L.nome, 'linha', () => abrirLinha(L.n))));
+    const paradas = Object.entries(D.paradas).filter(([, p]) => norm(p[0]).includes(q)).slice(0, 10);
+    paradas.forEach(([id, p]) => ul.append(botao('🚏', p[0], nLinhas(id), () => abrirParada(id))));
+    if (!linhas.length && !paradas.length) li(ul, 'Nada encontrado.');
+  }
+  function intervaloAgora(s) {
+    const h = new Date().getHours(), m = s.hw[h];
+    const ini = s.hw.findIndex(x => x > 0), fim = 23 - [...s.hw].reverse().findIndex(x => x > 0);
+    return (m ? 'Agora: 1 ônibus a cada <b>' + m + ' min</b>' : 'Agora: <b>sem ônibus nesta hora</b>') + ' · funciona das ' + ini + 'h às ' + (fim + 1) + 'h';
+  }
+  function abrirLinha(num, paradaId) {
+    if ($('abaExplorar').hidden) mostrarAba('explorar');
+    iniciar(); if (!mapa) return;
+    const L0 = D.linhas.find(L => L.n === num); if (!L0) return;
+    linhaAtual = L0; destaque = paradaId || null; pararAoVivo();
+    sentidoAtual = 0;
+    if (destaque) { const k = L0.s.findIndex(s => s.paradas.slice(0, -1).includes(destaque)); if (k >= 0) sentidoAtual = k; }
+    $('painelLinha').hidden = false;
+    $('lNum').textContent = L0.n; $('lNome').textContent = L0.nome;
+    const g = $('lSentidos'); g.replaceChildren();
+    L0.s.forEach((s, k) => { const b = document.createElement('button'); b.textContent = 'Sentido ' + s.dest; b.style.borderColor = CORES[k % 2]; b.onclick = () => { sentidoAtual = k; desenhar(); }; g.append(b); });
+    desenhar(true);
+  }
+  function desenhar(enquadrar) {
+    const Lx = linhaAtual; camada.clearLayers();
+    [...$('lSentidos').children].forEach((b, k) => b.setAttribute('aria-pressed', k === sentidoAtual));
+    let limites = null;
+    Lx.s.forEach((s, k) => {                               // os dois sentidos; o escolhido em destaque
+      const pts = decodificar(s.tracado);
+      if (!pts.length) return;
+      const ativo = k === sentidoAtual;
+      const pl = L.polyline(pts, { color: CORES[k % 2], weight: ativo ? 6 : 3, opacity: ativo ? .9 : .35 }).addTo(camada);
+      if (ativo) limites = pl.getBounds();
+    });
+    const s = Lx.s[sentidoAtual];
+    $('lInfo').innerHTML = intervaloAgora(s) + '<br>' + s.paradas.length + ' paradas · viagem de ~' + s.min[s.min.length - 1] + ' min';
+    const ul = $('lParadas'); ul.replaceChildren();
+    s.paradas.forEach((id, i) => {
+      const p = D.paradas[id]; if (!p) return;
+      const ref = REF.test(p[0]);
+      const m = L.circleMarker([p[1], p[2]], { radius: id === destaque ? 9 : ref ? 6 : 4, color: '#fff', weight: 1.5, fillColor: id === destaque ? '#3ddc84' : CORES[sentidoAtual % 2], fillOpacity: 1 }).addTo(camada);
+      m.bindPopup(() => popupParada(id, i === 0 ? 'Início' : '+' + s.min[i] + ' min da origem'));
+      const e = document.createElement('li'), b = document.createElement('button');
+      if (id === destaque) e.className = 'aqui';
+      const t = document.createElement('span'); t.className = 'min'; t.textContent = i === 0 ? 'início' : '+' + s.min[i] + ' min';
+      const n = document.createElement('span'); n.textContent = p[0]; if (ref) n.className = 'ref';
+      b.append(t, n); b.onclick = () => { mapa.setView([p[1], p[2]], 16); m.openPopup(); };
+      e.append(b); ul.append(e);
+      if (id === destaque) setTimeout(() => { ul.scrollTop = e.offsetTop - ul.clientHeight / 2; }, 50);   // rola so a lista, nao a pagina
+    });
+    if (enquadrar && limites) mapa.fitBounds(limites, { padding: [20, 20] });
+  }
+  function popupParada(id, extra) {
+    const p = D.paradas[id], div = document.createElement('div');
+    const t = document.createElement('b'); t.textContent = p[0]; div.append(t);
+    if (extra) { const e = document.createElement('div'); e.className = 'sub'; e.textContent = extra; div.append(e); }
+    const outras = [...(linhasPorParada[id] || [])].map(i => D.linhas[i]);
+    if (outras.length) {
+      const e = document.createElement('div'); e.style.marginTop = '6px'; e.textContent = 'Linhas aqui: ';
+      outras.sort((a, b) => a.n.localeCompare(b.n)).forEach(L0 => { const b = document.createElement('button'); b.textContent = L0.n; b.title = L0.nome; b.onclick = () => abrirLinha(L0.n, id); e.append(b); });
+      div.append(e);
+    }
+    if (gpsOk) {                                            // previsao real por GPS nesta parada
+      const g = document.createElement('div'); g.style.marginTop = '6px'; g.className = 'sub'; g.textContent = 'Buscando previsão GPS…'; div.append(g);
+      api('/api/previsao?parada=' + encodeURIComponent(id)).then(j => {
+        g.replaceChildren();
+        const t = document.createElement('b'); t.textContent = 'Chegando (GPS, ' + (j.hora || '') + '):'; g.append(t);
+        const ls = j.linhas.filter(l => l.chegadas.length).sort((a, b) => a.chegadas[0].min - b.chegadas[0].min).slice(0, 6);
+        if (!ls.length) g.append(' nenhum ônibus com GPS agora');
+        ls.forEach(l => { const d = document.createElement('div'); d.textContent = l.linha + ' → ' + (l.destino || '') + ': ' + l.chegadas.map(c => c.min + ' min' + (c.acessivel ? ' ♿' : '')).join(', '); g.append(d); });
+      }).catch(e => { g.textContent = 'GPS indisponível: ' + e.message; });
+    }
+    return div;
+  }
+  // ---- onibus ao vivo (GPS) da linha aberta, atualiza a cada 15 s ----
+  function pararAoVivo() {
+    clearInterval(timerGps); timerGps = null;
+    camadaGps && camadaGps.clearLayers();
+    $('bAoVivo').setAttribute('aria-pressed', 'false'); $('aoVivoInfo').textContent = '';
+  }
+  async function atualizarAoVivo() {
+    try {
+      const j = await api('/api/posicao?linha=' + encodeURIComponent(linhaAtual.n));
+      camadaGps.clearLayers();
+      j.onibus.forEach(o => {
+        if (o.lat == null) return;
+        L.circleMarker([o.lat, o.lon], { radius: 8, color: '#111', weight: 2, fillColor: '#ffc53d', fillOpacity: 1 })
+          .addTo(camadaGps).bindPopup('Ônibus ' + o.prefixo + (o.acessivel ? ' · acessível ♿' : '') + '<br>GPS ' + (o.atualizado || '').slice(11, 16) + ' (UTC)');
+      });
+      $('aoVivoInfo').textContent = ' ' + j.onibus.length + ' ônibus agora · ' + (j.hora || '');
+    } catch (e) { $('aoVivoInfo').textContent = ' GPS indisponível: ' + e.message; }
+  }
+  function gpsMudou() { $('bAoVivo').hidden = !gpsOk; }
+  $('bAoVivo').onclick = () => {
+    if (timerGps) { pararAoVivo(); return; }
+    $('bAoVivo').setAttribute('aria-pressed', 'true'); atualizarAoVivo(); timerGps = setInterval(atualizarAoVivo, 15000);
+  };
+  function abrirParada(id) {
+    const p = D.paradas[id]; if (!p) return;
+    pararAoVivo(); camada.clearLayers();
+    L.circleMarker([p[1], p[2]], { radius: 10, color: '#fff', weight: 2, fillColor: '#3ddc84', fillOpacity: 1 }).addTo(camada).bindPopup(() => popupParada(id)).openPopup();
+    mapa.setView([p[1], p[2]], 16);
+  }
+  function ondeEstou() {
+    const ul = $('resultados'); ul.replaceChildren();
+    if (!navigator.geolocation) { li(ul, 'Este navegador não informa a localização.'); return; }
+    li(ul, 'Pegando sua localização…');
+    navigator.geolocation.getCurrentPosition(pos => {
+      const { latitude: la, longitude: lo } = pos.coords;
+      const kx = 111320 * Math.cos(la * Math.PI / 180);
+      const perto = Object.entries(D.paradas).map(([id, p]) => [id, p, Math.hypot((p[2] - lo) * kx, (p[1] - la) * 110540)]).sort((a, b) => a[2] - b[2]).slice(0, 8);
+      ul.replaceChildren();
+      if (perto[0][2] > 5000) li(ul, 'Você parece estar fora de São Paulo: mostrando as paradas mais próximas mesmo assim.');
+      camada.clearLayers();
+      L.circleMarker([la, lo], { radius: 8, color: '#fff', weight: 2, fillColor: '#4ea1ff', fillOpacity: 1 }).addTo(camada).bindPopup('Você está aqui');
+      perto.forEach(([id, p, d]) => {
+        ul.append(botao(Math.round(d) + ' m', p[0], nLinhas(id), () => abrirParada(id)));
+        L.circleMarker([p[1], p[2]], { radius: 6, color: '#fff', weight: 1.5, fillColor: '#3ddc84', fillOpacity: 1 }).addTo(camada).bindPopup(() => popupParada(id, Math.round(d) + ' m de você'));
+      });
+      mapa.fitBounds(L.latLngBounds([[la, lo], ...perto.map(x => [x[1][1], x[1][2]])]), { padding: [30, 30] });
+    }, () => { ul.replaceChildren(); li(ul, 'Não deu pra pegar a localização (permissão negada?).'); }, { enableHighAccuracy: true, timeout: 10000 });
+  }
+  let tBusca;
+  $('busca').oninput = e => { clearTimeout(tBusca); tBusca = setTimeout(() => buscar(e.target.value), 150); };
+  $('bOndeEstou').onclick = () => { iniciar(); if (mapa) ondeEstou(); };
+  return { iniciar, abrirLinha, buscar, gpsMudou, _D: () => D, _lp: () => linhasPorParada };
+})();
+window.__explorar = explorar;
+verificarGps();   // depois do explorar existir
+</script>
+</body>
+</html>
